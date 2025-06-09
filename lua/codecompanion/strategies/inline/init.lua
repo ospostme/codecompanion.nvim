@@ -233,7 +233,69 @@ function Inline:prompt(user_prompt)
   log:trace("[Inline] Starting")
   log:debug("[Inline] User prompt: %s", user_prompt)
 
+  local adapter_config = self.adapter
+
+  -- Initial nil check
+  if not user_prompt then
+    return
+  end
+
+  -- Debug output
+  if adapter_config and adapter_config.opts and adapter_config.opts.debug_http then
+    -- print("[DEBUG] Adapter:", self.adapter)
+    -- print("[DEBUG] Adapter opts:", vim.inspect(adapter_config.opts))
+  end
+
+  -- Load task from config
+  local task_prompts = adapter_config.opts.task_prompts or {}
   local prompts = {}
+
+  -- Extract task name (first word) and extra instruction
+  local task_name, extra_instruction = user_prompt:match("^(%S+)%s*(.*)$")
+
+  -- Load task prompt templates
+  -- Skip task specifid process if nil
+  local template = (task_prompts and task_prompts[task_name] and task_prompts[task_name]["prompt"])
+  self.task_placement = (task_prompts and task_prompts[task_name] and task_prompts[task_name]["placement"]) or "replace"
+
+  -- Debug
+  log:debug("[Adapter] task_name: %s", task_name)
+  log:debug("[Adapter] extra_instruction: %s", extra_instruction)
+  log:debug("[Adapter] template: %s", template)
+  -- Only continue if task template is valid
+  if template then
+    -- Get visual selection code block from ext_prompts
+    local ext_prompts = self:make_ext_prompts()
+    local context_code = ""
+
+    if ext_prompts then
+      for _, p in ipairs(ext_prompts) do
+        if p.role == user_role and p.opts and p.opts.tag == "visual" then
+          context_code = p.content or ""
+          break
+        end
+      end
+    end
+
+    -- Combine context code and extra instruction
+    local full_input = context_code
+    if extra_instruction and extra_instruction ~= "" then
+      full_input = full_input .. "\n\n" .. extra_instruction
+    end
+
+    local formatted = string.format(template, full_input)
+
+    log:debug("[Inline] Final formatted prompt for '%s':\n%s", task_name, formatted)
+
+    table.insert(prompts, {
+      content = formatted,
+      role = user_role,
+      opts = { visible = true },
+    })
+
+    self.prompts = prompts
+    return self:submit(vim.deepcopy(prompts))
+  end
 
   local function add_prompt(content, role, opts)
     table.insert(prompts, {
@@ -244,19 +306,37 @@ function Inline:prompt(user_prompt)
   end
 
   -- Add system prompt first
-  table.insert(prompts, {
-    role = config.constants.SYSTEM_ROLE,
-    content = fmt(
-      CONSTANTS.SYSTEM_PROMPT,
-      self.buffer_context.filetype,
-      (self.classification.placement and CONSTANTS.RESPONSE_WITHOUT_PLACEMENT or CONSTANTS.RESPONSE_WITH_PLACEMENT),
-      config.opts.language
-    ),
-    opts = {
-      tag = "system_tag",
-      visible = false,
-    },
-  })
+  local custom_prompt_file = adapter_config and adapter_config.opts and adapter_config.opts.inline_system_prompt
+
+  if custom_prompt_file and vim.fn.filereadable(custom_prompt_file) == 1 then
+    local prompt_template = table.concat(vim.fn.readfile(custom_prompt_file), "\n")
+
+    table.insert(prompts, {
+      role = config.constants.SYSTEM_ROLE,
+      content = prompt_template
+        :gsub("{{language}}", self.context.filetype)
+        :gsub("{{placement}}", self.classification.placement or "chat"),
+      opts = {
+        tag = "system_tag",
+        visible = false,
+      },
+    })
+  else
+    -- ✅ Fallback to default system prompt
+    table.insert(prompts, {
+      role = config.constants.SYSTEM_ROLE,
+      content = fmt(
+        CONSTANTS.SYSTEM_PROMPT,
+        self.context.filetype,
+        (self.classification.placement and CONSTANTS.RESPONSE_WITHOUT_PLACEMENT or CONSTANTS.RESPONSE_WITH_PLACEMENT),
+        config.opts.language
+      ),
+      opts = {
+        tag = "system_tag",
+        visible = false,
+      },
+    })
+  end
 
   -- Followed by prompts from external sources
   local ext_prompts = self:make_ext_prompts()
@@ -531,16 +611,28 @@ function Inline:parse_output(output)
   if json then
     log:debug("[Inline] Parsed json:\n%s", json)
     return json
+    -- -- Try parsing as plain XML first
+    -- local xml = parse_xml(output)
+    -- if xml then
+    --   log:debug("[Inline] Parsed XML:\n%s", xml)
+    --   return xml
   end
 
   -- Fall back to Tree-sitter parsing
   local markdown_code = parse_with_treesitter(output)
+  -- print("[DEBUG] parse_output markdown_code:", markdown_code)
   if markdown_code then
     _, json = pcall(vim.json.decode, markdown_code)
     if json then
       log:debug("[Inline] Parsed markdown JSON:\n%s", json)
       return json
     end
+    -- markdown_code from small ollama model just return
+    -- return markdown_code
+    return {
+      placement = self.task_placement or "replace",
+      code = markdown_code,
+    }
   end
 
   return log:error("[Inline] Failed to parse the response")
