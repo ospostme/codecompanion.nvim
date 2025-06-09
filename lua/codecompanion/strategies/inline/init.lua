@@ -243,7 +243,7 @@ function Inline:prompt(user_prompt)
   -- Debug output
   if adapter_config and adapter_config.opts and adapter_config.opts.debug_http then
     -- print("[DEBUG] Adapter:", self.adapter)
-    print("[DEBUG] Adapter opts:", vim.inspect(adapter_config.opts))
+    -- print("[DEBUG] Adapter opts:", vim.inspect(adapter_config.opts))
   end
 
   -- Load task from config
@@ -605,8 +605,8 @@ end
 ---@param output string
 ---@return table|nil
 function Inline:parse_output(output)
-  print("[DEBUG] task_placement in parse_output:", self.task_placement)
-  print("[DEBUG] parse_output output:", output)
+  -- print("[DEBUG] task_placement in parse_output:", self.task_placement)
+  -- print("[DEBUG] parse_output output:", output)
 
   -- Clean code fences and newlines
   local json_candidate = output:gsub("^```[a-zA-Z]*", ""):gsub("```$", ""):gsub("^\n*", "")
@@ -625,7 +625,7 @@ function Inline:parse_output(output)
 
   -- Try Tree-sitter parse
   local markdown_code = parse_with_treesitter(output)
-  print("[DEBUG] parse_output markdown_code:", markdown_code)
+  -- print("[DEBUG] parse_output markdown_code:", markdown_code)
   if markdown_code then
     ok, json = pcall(vim.json.decode, markdown_code)
     if ok and json then
