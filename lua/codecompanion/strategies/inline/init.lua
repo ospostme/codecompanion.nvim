@@ -243,7 +243,7 @@ function Inline:prompt(user_prompt)
   -- Debug output
   if adapter_config and adapter_config.opts and adapter_config.opts.debug_http then
     -- print("[DEBUG] Adapter:", self.adapter)
-    -- print("[DEBUG] Adapter opts:", vim.inspect(adapter_config.opts))
+    print("[DEBUG] Adapter opts:", vim.inspect(adapter_config.opts))
   end
 
   -- Load task from config
@@ -605,11 +605,16 @@ end
 ---@param output string
 ---@return table|nil
 function Inline:parse_output(output)
-  -- Try parsing as plain JSON first
-  output = output:gsub("^```json", ""):gsub("```$", "")
-  local _, json = pcall(vim.json.decode, output)
-  if json then
-    log:debug("[Inline] Parsed json:\n%s", json)
+  print("[DEBUG] task_placement in parse_output:", self.task_placement)
+  print("[DEBUG] parse_output output:", output)
+
+  -- Clean code fences and newlines
+  local json_candidate = output:gsub("^```[a-zA-Z]*", ""):gsub("```$", ""):gsub("^\n*", "")
+
+  -- Try JSON parse
+  local ok, json = pcall(vim.json.decode, json_candidate)
+  if ok and json then
+    log:debug("[Inline] Parsed JSON:\n%s", vim.inspect(json))
     return json
     -- -- Try parsing as plain XML first
     -- local xml = parse_xml(output)
@@ -618,25 +623,69 @@ function Inline:parse_output(output)
     --   return xml
   end
 
-  -- Fall back to Tree-sitter parsing
+  -- Try Tree-sitter parse
   local markdown_code = parse_with_treesitter(output)
-  -- print("[DEBUG] parse_output markdown_code:", markdown_code)
+  print("[DEBUG] parse_output markdown_code:", markdown_code)
   if markdown_code then
-    _, json = pcall(vim.json.decode, markdown_code)
-    if json then
-      log:debug("[Inline] Parsed markdown JSON:\n%s", json)
+    ok, json = pcall(vim.json.decode, markdown_code)
+    if ok and json then
+      log:debug("[Inline] Parsed markdown JSON:\n%s", vim.inspect(json))
       return json
     end
-    -- markdown_code from small ollama model just return
-    -- return markdown_code
     return {
       placement = self.task_placement or "replace",
       code = markdown_code,
     }
   end
 
+  -- Fallback for pure plain-text (like LLM explanations)
+  if output and #output > 0 then
+    return {
+      placement = self.task_placement or "chat", -- assume explanation goes to chat
+      code = nil,
+      text = output,
+    }
+  end
+
   return log:error("[Inline] Failed to parse the response")
 end
+
+-- function Inline:parse_output(output)
+--   print("[DEBUG] parse_output output:", output)
+--   -- Try parsing as plain JSON first
+--   output = output:gsub("^```json", ""):gsub("```$", "")
+--   print("[DEBUG] parse_output output after remove json block marker:", output)
+--   local _, json = pcall(vim.json.decode, output)
+--   if json then
+--     print("[DEBUG] parse_output json:\n%s", json)
+--     log:debug("[Inline] Parsed json:\n%s", json)
+--     return json
+--     -- -- Try parsing as plain XML first
+--     -- local xml = parse_xml(output)
+--     -- if xml then
+--     --   log:debug("[Inline] Parsed XML:\n%s", xml)
+--     --   return xml
+--   end
+--
+--   -- Fall back to Tree-sitter parsing
+--   local markdown_code = parse_with_treesitter(output)
+--   print("[DEBUG] parse_output markdown_code:", markdown_code)
+--   if markdown_code then
+--     _, json = pcall(vim.json.decode, markdown_code)
+--     if json then
+--       log:debug("[Inline] Parsed markdown JSON:\n%s", json)
+--       return json
+--     end
+--     -- markdown_code from small ollama model just return
+--     -- return markdown_code
+--     return {
+--       placement = self.task_placement or "replace",
+--       code = markdown_code,
+--     }
+--   end
+--   print("[DEBUG] parse_output markdown_code:", markdown_code)
+--   return log:error("[Inline] Failed to parse the response")
+-- end
 
 ---Write the output from the LLM to the buffer
 ---@param output string
