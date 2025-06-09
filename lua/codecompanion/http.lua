@@ -53,6 +53,66 @@ end
 ---@field callback fun(err: nil|string, chunk: nil|table) Callback function, executed when the request has finished or is called multiple times if the request is streaming
 ---@field done? fun() Function to run when the request is complete
 
+-- Helper function to print and log HTTP request if debug flag enabled
+local function debug_print_request(adapter)
+  local debug_http = adapter.opts.debug_http or false
+  if not debug_http then
+    return
+  end
+  local request = adapter.opts.request
+  if not request then
+    return
+  end
+  print(">>> [CodeCompanion] HTTP Request JSON Body >>>")
+  if type(request) == "table" then
+    if request.body then
+      print(">>> [Request Body] >>>")
+      print(request.body)
+    else
+      print(vim.inspect(request))
+    end
+  else
+    print(request)
+  end
+  if type(request) == "table" and request.body then
+    log:info("[HTTP Request Body]\n%s", vim.inspect(request.body))
+  else
+    log:info("[HTTP Request Raw]\n%s", vim.inspect(request))
+  end
+end
+
+-- Helper function to print and log HTTP response if debug flag enabled
+local function debug_print_response(adapter, data)
+  local debug_http = adapter.opts.debug_http or false
+  if not debug_http then
+    return
+  end
+  if not data then
+    return
+  end
+
+  print(">>> [CodeCompanion] Raw HTTP Response >>>")
+
+  if type(data) == "table" then
+    if data.body then
+      print(">>> [Response Body] >>>")
+      print(data.body)
+    end
+
+    print(">>> [Full Response Table] >>>")
+    print(vim.inspect(data))
+  else
+    print(">>> [Raw Data (not a table)] >>>")
+    print(data)
+  end
+
+  if type(data) == "table" and data.body then
+    log:info("[Raw HTTP Response Body]\n%s", vim.inspect(data.body))
+  else
+    log:info("[Raw HTTP Response Raw Data]\n%s", vim.inspect(data))
+  end
+end
+
 ---Send a HTTP request
 ---@param payload { messages: table, tools: table|nil } The payload to be sent to the endpoint
 ---@param actions CodeCompanion.Adapter.RequestActions
@@ -104,6 +164,13 @@ function Client:request(payload, actions, opts)
 
   log:info("Request body file: %s", body_file.filename)
 
+  -- Prepare adapter.opts.request to hold the raw request body for debug print
+  adapter.opts.request = adapter.opts.request or {}
+  adapter.opts.request.body = body
+
+  -- Print/log HTTP request if debug enabled
+  debug_print_request(adapter)
+
   local function cleanup(status)
     if vim.tbl_contains({ "ERROR", "INFO" }, config.opts.log_level) and status ~= "error" then
       body_file:rm()
@@ -143,6 +210,10 @@ function Client:request(payload, actions, opts)
       vim.schedule(function()
         if (not adapter.opts.stream) and data and data ~= "" then
           log:trace("Output data:\n%s", data)
+
+          -- Print/log HTTP response if debug enabled
+          debug_print_response(adapter, data)
+
           cb(nil, data, adapter)
         end
         if handlers and handlers.on_exit then
