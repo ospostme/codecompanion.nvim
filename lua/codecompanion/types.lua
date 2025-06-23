@@ -107,6 +107,7 @@
 ---@field env? fun(schema: table): table|nil Any environment variables that can be used in the *_cmd fields. Receives the parsed schema from the LLM
 ---@field handlers table Functions which handle the execution of a tool
 ---@field handlers.setup? fun(self: CodeCompanion.Agent.Tool, agent: CodeCompanion.Agent): any Function used to setup the tool. Called before any commands
+---@field handlers.prompt_condition? fun(self: CodeCompanion.Agent.Tool, agent: CodeCompanion.Agent, config: table): boolean Function to determine whether to show the promp to the user or not
 ---@field handlers.on_exit? fun(self: CodeCompanion.Agent.Tool, agent: CodeCompanion.Agent): any Function to call at the end of a group of commands or functions
 ---@field output? table Functions which handle the output after every execution of a tool
 ---@field output.prompt fun(self: CodeCompanion.Agent.Tool, agent: CodeCompanion.Agent): string The message which is shared with the user when asking for their approval
@@ -114,6 +115,7 @@
 ---@field output.error? fun(self: CodeCompanion.Agent.Tool, agent: CodeCompanion.Agent, cmd: table, stderr: table, stdout?: table): any The function to call if an error occurs
 ---@field output.success? fun(self: CodeCompanion.Agent.Tool, agent: CodeCompanion.Agent, cmd: table, stdout: table): any Function to call if the tool is successful
 ---@field args table The arguments sent over by the LLM when making the request
+---@field tool table The tool configuration from the config file
 
 ---@class CodeCompanion.SlashCommand.Provider
 ---@field output function The function to call when a selection is made

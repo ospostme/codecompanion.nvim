@@ -56,21 +56,29 @@ local defaults = {
         groups = {
           ["full_stack_dev"] = {
             description = "Full Stack Developer - Can run code, edit code and modify files",
-            system_prompt = "**DO NOT** make any assumptions about the dependencies that a user has installed. If you need to install any dependencies to fulfil the user's request, do so via the Command Runner tool. If the user doesn't specify a path, use their current working directory.",
             tools = {
               "cmd_runner",
-              "editor",
               "create_file",
-              "read_file",
+              "file_search",
+              "grep_search",
               "insert_edit_into_file",
+              "read_file",
+              "web_search",
+            },
+            opts = {
+              collapse_tools = true,
             },
           },
           ["files"] = {
             description = "Tools related to creating, reading and editing files",
             tools = {
               "create_file",
-              "read_file",
+              "file_search",
               "insert_edit_into_file",
+              "read_file",
+            },
+            opts = {
+              collapse_tools = true,
             },
           },
         },
@@ -81,22 +89,41 @@ local defaults = {
             requires_approval = true,
           },
         },
-        ["editor"] = {
-          callback = "strategies.chat.agents.tools.editor",
-          description = "Update a buffer with the LLM's response",
-        },
-        ["insert_edit_into_file"] = {
-          callback = "strategies.chat.agents.tools.insert_edit_into_file",
-          description = "Insert code into an existing file",
-          opts = {
-            requires_approval = true,
-          },
-        },
         ["create_file"] = {
           callback = "strategies.chat.agents.tools.create_file",
           description = "Create a file in the current working directory",
           opts = {
             requires_approval = true,
+          },
+        },
+        ["file_search"] = {
+          callback = "strategies.chat.agents.tools.file_search",
+          description = "Search for files in the current working directory by glob pattern",
+          opts = {
+            max_results = 500,
+          },
+        },
+        ["grep_search"] = {
+          callback = "strategies.chat.agents.tools.grep_search",
+          enabled = function()
+            -- Currently this tool only supports ripgrep
+            return vim.fn.executable("rg") == 1
+          end,
+          description = "Search for text in the current working directory",
+          opts = {
+            max_results = 100,
+            respect_gitignore = true,
+          },
+        },
+        ["insert_edit_into_file"] = {
+          callback = "strategies.chat.agents.tools.insert_edit_into_file",
+          description = "Insert code into an existing file",
+          opts = {
+            requires_approval = { -- Require approval before the tool is executed?
+              buffer = false, -- For editing buffers in Neovim
+              file = true, -- For editing files in the current working directory
+            },
+            user_confirmation = true, -- Require confirmation from the user before moving on in the chat buffer?
           },
         },
         ["read_file"] = {
@@ -123,6 +150,10 @@ local defaults = {
         opts = {
           auto_submit_errors = false, -- Send any errors to the LLM automatically?
           auto_submit_success = true, -- Send any successful output to the LLM automatically?
+          wait_timeout = 30000, -- How long to wait for user input before timing out (milliseconds)
+          ---Tools and/or groups that are always loaded in a chat buffer
+          ---@type string[]
+          default_tools = {},
         },
       },
       variables = {
@@ -131,6 +162,7 @@ local defaults = {
           description = "Share the current buffer with the LLM",
           opts = {
             contains_code = true,
+            default_params = "watch", -- watch|pin
             has_params = true,
           },
         },
@@ -155,6 +187,7 @@ local defaults = {
           description = "Insert open buffers",
           opts = {
             contains_code = true,
+            default_params = "watch", -- watch|pin
             provider = providers.pickers, -- telescope|fzf_lua|mini_pick|snacks|default
           },
         },
@@ -165,6 +198,13 @@ local defaults = {
             adapter = "jina", -- jina
             cache_path = vim.fn.stdpath("data") .. "/codecompanion/urls",
             provider = providers.pickers, -- telescope|fzf_lua|mini_pick|snacks|default
+          },
+        },
+        ["quickfix"] = {
+          callback = "strategies.chat.slash_commands.quickfix",
+          description = "Insert quickfix list entries",
+          opts = {
+            contains_code = true,
           },
         },
         ["file"] = {
@@ -570,7 +610,7 @@ Your instructions here
 
 You are required to write code following the instructions provided above and test the correctness by running the designated test suite. Follow these steps exactly:
 
-1. Update the code in #buffer{watch} using the @editor tool
+1. Update the code in #buffer using the @insert_edit_into_file tool
 2. Then use the @cmd_runner tool to run the test suite with `<test_cmd>` (do this after you have updated the code)
 3. Make sure you trigger both tools in the same response
 
@@ -961,7 +1001,7 @@ You must create or modify a workspace file through a series of prompts over mult
     chat = {
       icons = {
         pinned_buffer = " ",
-        watched_buffer = "👀 ",
+        watched_buffer = "󰂥 ",
       },
       debug_window = {
         ---@return number|fun(): number
@@ -999,6 +1039,7 @@ You must create or modify a workspace file through a series of prompts over mult
 
       show_references = true, -- Show references (from slash commands and variables) in the chat buffer?
       show_settings = false, -- Show LLM settings at the top of the chat buffer?
+      show_tools_processing = true, -- Show the loading message when tools are being executed?
       show_token_count = true, -- Show the token count for each response?
       start_in_insert_mode = false, -- Open the chat buffer in insert mode?
 
@@ -1026,6 +1067,10 @@ You must create or modify a workspace file through a series of prompts over mult
     inline = {
       -- If the inline prompt creates a new buffer, how should we display this?
       layout = "vertical", -- vertical|horizontal|buffer
+    },
+    icons = {
+      loading = " ",
+      warning = " ",
     },
   },
   -- EXTENSIONS ------------------------------------------------------
@@ -1070,11 +1115,12 @@ Your core tasks include:
 
 You must:
 - Follow the user's requirements carefully and to the letter.
+- Use the context and attachments the user provides.
 - Keep your answers short and impersonal, especially if the user's context is outside your core tasks.
 - Minimize additional prose unless clarification is needed.
 - Use Markdown formatting in your answers.
 - Include the programming language name at the start of each Markdown code block.
-- Avoid including line numbers in code blocks.
+- Do not include line numbers in code blocks.
 - Avoid wrapping the whole response in triple backticks.
 - Only return code that's directly relevant to the task at hand. You may omit code that isn’t necessary for the solution.
 - Avoid using H1, H2 or H3 headers in your responses as these are reserved for the user.

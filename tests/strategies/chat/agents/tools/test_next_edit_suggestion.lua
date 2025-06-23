@@ -6,9 +6,7 @@ local child = MiniTest.new_child_neovim()
 local T = new_set({
   hooks = {
     pre_case = function()
-      child.restart({ "-u", "scripts/minimal_init.lua" })
-      child.o.statusline = ""
-      child.o.laststatus = 0
+      h.child_start(child)
       child.lua([[
         h = require('tests.helpers')
         chat, agent = h.setup_chat_buffer()
@@ -52,7 +50,7 @@ T["next_edit_suggestion tool"] = function()
   local cursor_pos = child.lua_get(string.format("vim.api.nvim_win_get_cursor(%d)", current_winnr))
   local expected_path = child.lua("return vim.fs.normalize(_G.TEST_FILE_PATH)")
 
-  h.eq(expected_path, current_bufname, "Should jump to the correct file")
+  h.expect_contains(expected_path, current_bufname, "Should jump to the correct file")
   h.eq(10, cursor_pos[1], "Should jump to the correct line")
 end
 

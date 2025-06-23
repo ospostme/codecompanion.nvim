@@ -89,6 +89,9 @@ require("codecompanion").setup({
 })
 ```
 
+> [!IMPORTANT]
+> Each slash command may have their own unique configuration so be sure to check out the [config.lua](https://github.com/olimorris/codecompanion.nvim/blob/main/lua/codecompanion/config.lua) file
+
 You can also add your own slash commands:
 
 ```lua
@@ -170,6 +173,9 @@ require("codecompanion").setup({
               "editor",
               -- Add your own tools or reuse existing ones
             },
+            opts = {
+              collapse_tools = true, -- When true, show as a single group reference instead of individual tools
+            },
           },
         },
       },
@@ -181,6 +187,29 @@ require("codecompanion").setup({
 When users introduce the agent `@my_agent` in the chat buffer, it can call the tools you listed (like `@my_tool`) to perform tasks on your code.
 
 A tool is a [`CodeCompanion.Tool`](/extending/tools) table with specific keys that define the interface and workflow of the tool. The table can be resolved using the `callback` option. The `callback` option can be a table itself or either a function or a string that points to a luafile that return the table.
+
+### Tool Conditionals
+
+Tools can also be conditionally enabled:
+
+```lua
+require("codecompanion").setup({
+  strategies = {
+    chat = {
+      tools = {
+        ["grep_search"] = {
+          ---@return boolean
+          enabled = function()
+            return vim.fn.executable("rg") == 1
+          end,
+        },
+      }
+    }
+  }
+})
+```
+
+This is useful to ensure that a particular dependency is installed on the machine. After the user has installed the dependency, the `:CodeCompanionChat RefreshCache` command can be used to refresh the cache's across chat buffers.
 
 ### Approvals
 
@@ -214,15 +243,37 @@ require("codecompanion").setup({
     chat = {
       tools = {
         opts = {
-          auto_submit_errors = false, -- Send any errors to the LLM automatically?
-          auto_submit_success = false, -- Send any successful output to the LLM automatically?
+          auto_submit_errors = true, -- Send any errors to the LLM automatically?
+          auto_submit_success = true, -- Send any successful output to the LLM automatically?
         },
       }
     }
   }
 })
-
 ```
+
+### Automatically Add Tools to Chat
+
+You can configure the plugin to automatically add tools and tool groups to new chat buffers:
+
+```lua
+require("codecompanion").setup({
+  strategies = {
+    chat = {
+      tools = {
+        opts = {
+          default_tools = {
+            "my_tool",
+            "my_tool_group"
+          }
+        },
+      }
+    }
+  }
+})
+```
+
+This also works for [extensions](/configuration/extensions).
 
 ## Prompt Decorator
 
@@ -311,7 +362,7 @@ require("codecompanion").setup({
 > [!NOTE]
 > Currently the plugin only supports native Neovim diff or [mini.diff](https://github.com/echasnovski/mini.diff)
 
-If you utilize the `@editor` tool, then the plugin can update a given chat buffer. A diff will be created so you can see the changes made by the LLM.
+If you utilize the `@insert_edit_into_file` tool, then the plugin can update a given chat buffer. A diff will be created so you can see the changes made by the LLM.
 
 There are a number of diff settings available to you:
 
@@ -431,7 +482,8 @@ require("codecompanion").setup({
   },
 })
 ```
+
 This can either be a string (denoting a VimScript command), or a function that
 takes a single parameter (the path to the file to jump to). The default action
-is to jump to an existing tab if the file is already opened, and open a new tab 
+is to jump to an existing tab if the file is already opened, and open a new tab
 otherwise.
