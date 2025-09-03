@@ -242,8 +242,8 @@ function Inline:prompt(user_prompt)
 
   -- Debug output
   if adapter_config and adapter_config.opts and adapter_config.opts.debug_http then
-    -- print("[DEBUG] Adapter:", self.adapter)
-    -- print("[DEBUG] Adapter opts:", vim.inspect(adapter_config.opts))
+    print("[DEBUG] Adapter:", self.adapter)
+    print("[DEBUG] Adapter opts:", vim.inspect(adapter_config.opts))
   end
 
   -- Load task from config
@@ -311,11 +311,12 @@ function Inline:prompt(user_prompt)
   if custom_prompt_file and vim.fn.filereadable(custom_prompt_file) == 1 then
     local prompt_template = table.concat(vim.fn.readfile(custom_prompt_file), "\n")
 
+    local filetype = (self.context and self.context.filetype) or vim.bo.filetype or "text"
+    local placement = (self.classification and self.classification.placement) or "chat"
+
     table.insert(prompts, {
       role = config.constants.SYSTEM_ROLE,
-      content = prompt_template
-        :gsub("{{language}}", self.context.filetype)
-        :gsub("{{placement}}", self.classification.placement or "chat"),
+      content = prompt_template:gsub("{{language}}", filetype):gsub("{{placement}}", placement),
       opts = {
         tag = "system_tag",
         visible = false,
@@ -605,8 +606,12 @@ end
 ---@param output string
 ---@return table|nil
 function Inline:parse_output(output)
-  -- print("[DEBUG] task_placement in parse_output:", self.task_placement)
-  -- print("[DEBUG] parse_output output:", output)
+  local adapter_config = self.adapter
+
+  if adapter_config and adapter_config.opts and adapter_config.opts.debug_http then
+    print("[DEBUG] task_placement in parse_output:", self.task_placement)
+    print("[DEBUG] parse_output output:", output)
+  end
 
   -- Clean code fences and newlines
   local json_candidate = output:gsub("^```[a-zA-Z]*", ""):gsub("```$", ""):gsub("^\n*", "")
@@ -625,7 +630,11 @@ function Inline:parse_output(output)
 
   -- Try Tree-sitter parse
   local markdown_code = parse_with_treesitter(output)
-  -- print("[DEBUG] parse_output markdown_code:", markdown_code)
+
+  if adapter_config and adapter_config.opts and adapter_config.opts.debug_http then
+    print("[DEBUG] parse_output markdown_code:", markdown_code)
+  end
+
   if markdown_code then
     ok, json = pcall(vim.json.decode, markdown_code)
     if ok and json then
