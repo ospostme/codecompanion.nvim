@@ -307,13 +307,12 @@ function Inline:prompt(user_prompt)
 
   -- Add system prompt first
   local custom_prompt_file = adapter_config and adapter_config.opts and adapter_config.opts.inline_system_prompt
+  local inline_replace_skip = adapter_config and adapter_config.opts and adapter_config.opts.inline_replace_skip
+  local filetype = (self.context and self.context.filetype) or vim.bo.filetype or "text"
+  local placement = (self.classification and self.classification.placement) or "chat"
 
-  if custom_prompt_file and vim.fn.filereadable(custom_prompt_file) == 1 then
+  if not inline_replace_skip[task_name] and custom_prompt_file and vim.fn.filereadable(custom_prompt_file) == 1 then
     local prompt_template = table.concat(vim.fn.readfile(custom_prompt_file), "\n")
-
-    local filetype = (self.context and self.context.filetype) or vim.bo.filetype or "text"
-    local placement = (self.classification and self.classification.placement) or "chat"
-
     table.insert(prompts, {
       role = config.constants.SYSTEM_ROLE,
       content = prompt_template:gsub("{{language}}", filetype):gsub("{{placement}}", placement),
@@ -323,12 +322,12 @@ function Inline:prompt(user_prompt)
       },
     })
   else
-    -- ✅ Fallback to default system prompt
+    -- ✅ Fallback to default inline system prompt
     table.insert(prompts, {
       role = config.constants.SYSTEM_ROLE,
       content = fmt(
         CONSTANTS.SYSTEM_PROMPT,
-        self.context.filetype,
+        filetype,
         (self.classification.placement and CONSTANTS.RESPONSE_WITHOUT_PLACEMENT or CONSTANTS.RESPONSE_WITH_PLACEMENT),
         config.opts.language
       ),

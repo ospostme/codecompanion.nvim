@@ -557,6 +557,7 @@ local defaults = {
         index = 3,
         is_default = true,
         is_slash_cmd = false,
+        modes = {},
         user_prompt = true,
       },
       prompts = {
@@ -577,7 +578,7 @@ local defaults = {
       opts = {
         index = 4,
         is_default = true,
-        short_name = "cw",
+        -- short_name = "cw",
       },
       prompts = {
         {
@@ -628,7 +629,7 @@ local defaults = {
       opts = {
         index = 5,
         is_default = true,
-        short_name = "et",
+        -- short_name = "et",
       },
       prompts = {
         {
@@ -683,7 +684,7 @@ We'll repeat this cycle until the tests pass. Ensure no deviations from these st
         is_default = true,
         is_slash_cmd = false,
         modes = { "v" },
-        short_name = "explain",
+        -- short_name = "explain",
         auto_submit = true,
         user_prompt = false,
         stop_context_insertion = true,
@@ -722,14 +723,14 @@ We'll repeat this cycle until the tests pass. Ensure no deviations from these st
         },
       },
     },
-    ["Unit Tests"] = {
+    ["UnitTests"] = {
       strategy = "inline",
       description = "Generate unit tests for the selected code",
       opts = {
         index = 7,
         is_default = true,
-        is_slash_cmd = false,
-        modes = { "v" },
+        is_slash_cmd = true,
+        modes = {},
         short_name = "tests",
         auto_submit = true,
         user_prompt = false,
@@ -776,7 +777,7 @@ Please generate unit tests for this code from buffer %d:
         },
       },
     },
-    ["Fix code"] = {
+    ["Fixcode"] = {
       strategy = "chat",
       description = "Fix the selected code",
       opts = {
@@ -784,7 +785,7 @@ Please generate unit tests for this code from buffer %d:
         is_default = true,
         is_slash_cmd = false,
         modes = { "v" },
-        short_name = "fix",
+        -- short_name = "fix",
         auto_submit = true,
         user_prompt = false,
         stop_context_insertion = true,
@@ -831,7 +832,7 @@ Use Markdown formatting and include the programming language name at the start o
         },
       },
     },
-    ["Explain LSP Diagnostics"] = {
+    ["LSP"] = {
       strategy = "chat",
       description = "Explain the LSP diagnostics for the selected code",
       opts = {
@@ -839,7 +840,7 @@ Use Markdown formatting and include the programming language name at the start o
         is_default = true,
         is_slash_cmd = false,
         modes = { "v" },
-        short_name = "lsp",
+        -- short_name = "lsp",
         auto_submit = true,
         user_prompt = false,
         stop_context_insertion = true,
@@ -911,14 +912,14 @@ This is the code, for context:
         },
       },
     },
-    ["Generate a Commit Message"] = {
+    ["Commit"] = {
       strategy = "chat",
       description = "Generate a commit message",
       opts = {
         index = 10,
         is_default = true,
         is_slash_cmd = true,
-        short_name = "commit",
+        -- short_name = "commit",
         auto_submit = true,
       },
       prompts = {
@@ -948,7 +949,7 @@ This is the code, for context:
         index = 11,
         ignore_system_prompt = true,
         is_default = true,
-        short_name = "workspace",
+        -- short_name = "workspace",
       },
       context = {
         {
