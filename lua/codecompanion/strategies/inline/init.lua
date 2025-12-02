@@ -250,20 +250,19 @@ function Inline:prompt(user_prompt)
   local task_prompts = adapter_config.opts.task_prompts or {}
   local prompts = {}
 
-  -- Extract task name (first word) and extra instruction
+  -- Load task name (first word) and extra instruction
   local task_name, extra_instruction = user_prompt:match("^(%S+)%s*(.*)$")
 
-  -- Load task prompt templates
-  -- Skip task specifid process if nil
-  local template = (task_prompts and task_prompts[task_name] and task_prompts[task_name]["prompt"])
-  self.task_placement = (task_prompts and task_prompts[task_name] and task_prompts[task_name]["placement"]) or "replace"
+  -- Check for a task definition in the adapter's task_prompts
+  local task_def = task_prompts and task_prompts[task_name]
+  self.task_placement = (task_def and task_def.placement) or "replace"
 
   -- Debug
   log:debug("[Adapter] task_name: %s", task_name)
   log:debug("[Adapter] extra_instruction: %s", extra_instruction)
-  log:debug("[Adapter] template: %s", template)
-  -- Only continue if task template is valid
-  if template then
+
+  -- Only continue if a valid task definition is found
+  if task_def and task_def.prompt then
     -- Get visual selection code block from ext_prompts
     local ext_prompts = self:make_ext_prompts()
     local context_code = ""
@@ -283,12 +282,29 @@ function Inline:prompt(user_prompt)
       full_input = full_input .. "\n\n" .. extra_instruction
     end
 
-    local formatted = string.format(template, full_input)
+    local final_user_prompt
+    -- If it's a chat task, the user prompt should only be the instruction text.
+    -- The chat buffer will add the code context automatically, preventing duplication.
+    if task_def.placement == "chat" then
+      -- Remove the '%s' placeholder and any resulting trailing whitespace
+      final_user_prompt = task_def.prompt:gsub("%%s", ""):gsub("%s*$", "")
+    else
+      -- For all other tasks (replace, before, etc.), include the code in the prompt.
+      final_user_prompt = string.format(task_def.prompt, full_input)
+    end
 
-    log:debug("[Inline] Final formatted prompt for '%s':\n%s", task_name, formatted)
+    -- Check if the task definition from the loader has a system prompt
+    if task_def.system_prompt then
+      table.insert(prompts, {
+        role = config.constants.SYSTEM_ROLE,
+        content = task_def.system_prompt,
+        opts = { visible = false },
+      })
+    end
 
+    -- Add the final user prompt
     table.insert(prompts, {
-      content = formatted,
+      content = final_user_prompt,
       role = user_role,
       opts = { visible = true },
     })
