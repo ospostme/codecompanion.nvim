@@ -4,9 +4,10 @@ parsing settings and rendering extmarks.
 --]]
 local config = require("codecompanion.config")
 local helpers = require("codecompanion.strategies.chat.helpers")
-local log = require("codecompanion.utils.log")
+local log = require("codecompanion.utils.log") -- Assuming this is the logger utility
 local schema = require("codecompanion.schema")
 local ui = require("codecompanion.utils.ui")
+local ui_manager = require("codecompanion.strategies.chat.ui_manager")
 local util = require("codecompanion.utils")
 local yaml = require("codecompanion.utils.yaml")
 
@@ -16,6 +17,7 @@ local CONSTANTS = {
   NS_HEADER = api.nvim_create_namespace("CodeCompanion-headers"),
   NS_TOKENS = api.nvim_create_namespace("CodeCompanion-tokens"),
   NS_VIRTUAL_TEXT = api.nvim_create_namespace("CodeCompanion-virtual_text"),
+  CC_HIDE_LLM_RESPONSES_KEY = "__codecompanion_hide_llm_responses", -- Use a unique key for buffer-local var
 
   AUTOCMD_GROUP = "codecompanion.chat.ui",
 }
@@ -44,12 +46,32 @@ function UI.new(args)
     settings = args.settings,
     tokens = args.tokens,
     winnr = args.winnr,
+    -- Store context, messages, opts for potential re-rendering if needed by toggle function
+    context = nil,
+    messages = nil,
+    opts = nil,
   }, { __index = UI })
+
+  -- Initialize the buffer-local variables
+  api.nvim_buf_set_var(args.chat_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY, false)
+  api.nvim_buf_set_var(args.chat_bufnr, "chat_id", args.chat_id)
+
+  ui_manager.register(args.chat_bufnr, self)
 
   self.aug = api.nvim_create_augroup(CONSTANTS.AUTOCMD_GROUP .. ":" .. self.chat_bufnr, {
     clear = false,
   })
   self.folds = require("codecompanion.strategies.chat.ui.folds")
+
+  api.nvim_create_autocmd("BufWipeout", {
+    group = self.aug,
+    buffer = self.chat_bufnr,
+    once = true,
+    desc = "Unregister CodeCompanion chat UI instance",
+    callback = function()
+      ui_manager.unregister(self.chat_bufnr)
+    end,
+  })
 
   api.nvim_create_autocmd("InsertEnter", {
     group = self.aug,
@@ -171,10 +193,11 @@ function UI:hide()
     if self:is_active() then
       vim.cmd("hide")
     else
-      if not self.winnr then
-        self.winnr = ui.buf_get_win(self.chat_bufnr)
+      -- Safely get the window number
+      local winnr = ui.buf_get_win(self.chat_bufnr)
+      if winnr and api.nvim_win_is_valid(winnr) then
+        api.nvim_win_hide(winnr)
       end
-      api.nvim_win_hide(self.winnr)
     end
   else
     vim.cmd("buffer " .. vim.fn.bufnr("#"))
@@ -242,13 +265,53 @@ function UI:set_header(tbl, role)
   table.insert(tbl, "")
 end
 
+---Toggle visibility of LLM responses in the chat buffer.
+---@return nil
+function UI:toggle_llm_responses()
+  local hide_llm = api.nvim_buf_get_var(self.chat_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY)
+  local new_state = not hide_llm
+  api.nvim_buf_set_var(self.chat_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY, new_state)
+
+  -- Re-render the buffer to apply the change.
+  -- We need access to context, messages, and opts. These are typically passed to UI:render.
+  -- To re-render, we can call UI:render with the stored state if available.
+  if self.context and self.messages and self.opts then
+    self:render(self.context, self.messages, self.opts)
+  else
+    -- Fallback to just redrawing if state is not stored or render is not directly callable here
+    -- Ensure winnr is valid before attempting to set buffer
+    if self.winnr and api.nvim_win_is_valid(self.winnr) then
+      api.nvim_win_set_buf(self.winnr, self.chat_bufnr) -- Force redraw of buffer in window
+      vim.cmd("redraw")
+    else
+      -- If winnr is invalid, try to find it or just redraw the screen
+      local winnr_found = ui.buf_get_win(self.chat_bufnr)
+      if winnr_found and api.nvim_win_is_valid(winnr_found) then
+        api.nvim_win_set_buf(winnr_found, self.chat_bufnr)
+        vim.cmd("redraw")
+      else
+        vim.cmd("redraw") -- Basic redraw if all else fails
+      end
+    end
+  end
+
+  log:info("LLM responses visibility toggled: %s", new_state)
+  util.fire("ChatLLMToggle", { bufnr = self.chat_bufnr, hidden = new_state, id = self.chat_id })
+end
+
 ---Render the settings and any messages in the chat buffer
 ---@param context table
 ---@param messages table
 ---@param opts table
 ---@return self
 function UI:render(context, messages, opts)
+  -- Store context, messages, opts for potential use by toggle_llm_responses
+  self.context = context
+  self.messages = messages
+  self.opts = opts
+
   local lines = {}
+  local current_llm_hidden = api.nvim_buf_get_var(self.chat_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY)
 
   local function spacer()
     table.insert(lines, "")
@@ -259,8 +322,12 @@ function UI:render(context, messages, opts)
 
   local function add_messages_to_buf(msgs)
     for i, msg in ipairs(msgs) do
-      if (msg.role ~= config.constants.SYSTEM_ROLE) and not (msg.opts and msg.opts.visible == false) then
-        -- For workflow prompts: Ensure main user role doesn't get spaced
+      -- Add this condition to skip LLM messages if toggled off
+      if
+        (msg.role ~= config.constants.SYSTEM_ROLE)
+        and not (msg.opts and msg.opts.visible == false)
+        and not (msg.role == config.constants.LLM_ROLE and current_llm_hidden)
+      then
         if i > 1 and self.last_role ~= msg.role and msg.role ~= config.constants.USER_ROLE then
           spacer()
         end
@@ -287,7 +354,7 @@ function UI:render(context, messages, opts)
         last_set_role = msg.role
         self.last_role = msg.role
 
-        -- The Chat:Submit method will parse the last message and it to the messages table
+        -- The Chat:Submit method will parse the last message and add it to the messages table
         if i == #msgs then
           table.remove(msgs, i)
         end
@@ -339,6 +406,33 @@ function UI:render(context, messages, opts)
   return self
 end
 
+-- Add a new command to expose UI:toggle_llm_responses
+vim.api.nvim_create_user_command("CodeCompanionToggleLLMResponses", function()
+  local current_bufnr = api.nvim_get_current_buf()
+  local buftype = vim.bo[current_bufnr].buftype
+  local filetype = vim.bo[current_bufnr].filetype
+
+  if buftype == "nofile" and filetype == "codecompanion" then
+    local ui_instance = ui_manager.get(current_bufnr)
+    if ui_instance then
+      ui_instance:toggle_llm_responses()
+    else
+      log:warn("Could not find CodeCompanion UI instance for buffer %d. Redrawing.", current_bufnr)
+      vim.cmd("redraw")
+      local hide_llm = api.nvim_buf_get_var(current_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY)
+      local new_state = not hide_llm
+      api.nvim_buf_set_var(current_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY, new_state)
+      local chat_id = api.nvim_buf_get_var(current_bufnr, "chat_id") or "unknown"
+      util.fire("ChatLLMToggle", { bufnr = current_bufnr, hidden = new_state, id = chat_id })
+    end
+  else
+    log:warn("This command can only be used in a CodeCompanion chat buffer.")
+  end
+end, {
+  desc = "Toggle visibility of LLM responses in the chat buffer",
+  nargs = 0,
+})
+
 ---Render the headers in the chat buffer and apply extmarks
 ---@return nil
 function UI:render_headers()
@@ -347,22 +441,34 @@ function UI:render_headers()
   end
 
   local separator = config.display.chat.separator
+  -- Get lines from the buffer, ensure it's not nil or empty before proceeding.
   local lines = api.nvim_buf_get_lines(self.chat_bufnr, 0, -1, false)
+  if not lines or #lines == 0 then
+    return
+  end
+
   local llm_role = set_llm_role(self.roles.llm, self.adapter)
 
-  for line, content in ipairs(lines) do
+  for line_idx, content in ipairs(lines) do
+    -- Use vim.pesc for escaping special characters in roles when matching
     if content:match("^## " .. vim.pesc(self.roles.user)) or content:match("^## " .. vim.pesc(llm_role)) then
-      local col = vim.fn.strwidth(content) - vim.fn.strwidth(separator)
+      -- Calculate column for separator. Using strwidth for correct character width.
+      local header_width = vim.fn.strwidth(content)
+      local separator_width = vim.fn.strwidth(separator)
+      local col = header_width - separator_width
 
-      api.nvim_buf_set_extmark(self.chat_bufnr, CONSTANTS.NS_HEADER, line - 1, col, {
+      -- Ensure col is not negative (in case separator is wider than header)
+      col = math.max(0, col)
+
+      api.nvim_buf_set_extmark(self.chat_bufnr, CONSTANTS.NS_HEADER, line_idx - 1, col, {
         virt_text_win_col = col,
         virt_text = { { string.rep(separator, vim.go.columns), "CodeCompanionChatSeparator" } },
         priority = 100,
       })
 
       -- Set the highlight group for the header
-      api.nvim_buf_set_extmark(self.chat_bufnr, CONSTANTS.NS_HEADER, line - 1, 0, {
-        end_col = col + 1,
+      api.nvim_buf_set_extmark(self.chat_bufnr, CONSTANTS.NS_HEADER, line_idx - 1, 0, {
+        end_col = col + separator_width, -- Adjust end_col to span the header text
         hl_group = "CodeCompanionChatHeader",
       })
     end
@@ -453,22 +559,32 @@ function UI:fold_code()
   local query = vim.treesitter.query.parse(
     "markdown",
     [[
-(section
-(
- (atx_heading
-  (atx_h2_marker)
-  heading_content: (_) @role
-)
-([
-  (fenced_code_block)
-  (indented_code_block)
-] @code (#trim! @code))
-))
-]]
+    (section
+    (
+     (atx_heading
+      (atx_h2_marker)
+      heading_content: (_) @role
+    )
+    ([
+      (fenced_code_block)
+      (indented_code_block)
+    ] @code (#trim! @code))
+    ))
+    ]]
   )
 
+  -- Safely get the parser and tree
   local parser = vim.treesitter.get_parser(self.chat_bufnr, "markdown")
+  if not parser then
+    log:warn("Could not get treesitter parser for markdown.")
+    return self
+  end
   local tree = parser:parse()[1]
+  if not tree then
+    log:warn("Could not get treesitter tree for markdown.")
+    return self
+  end
+
   vim.o.foldmethod = "manual"
 
   local role
@@ -488,9 +604,13 @@ function UI:fold_code()
       if role:match(self.roles.user) and match.code then
         local start_row, _, end_row, _ = match.code.node:range()
         if start_row < end_row then
-          api.nvim_buf_call(self.chat_bufnr, function()
+          -- Use pcall for safety when calling vim.cmd
+          local ok, _ = pcall(function()
             vim.cmd(string.format("%d,%dfold", start_row, end_row))
           end)
+          if not ok then
+            log:error("Failed to fold code from line %d to %d", start_row, end_row)
+          end
         end
       end
     end
