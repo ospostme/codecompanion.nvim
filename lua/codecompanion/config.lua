@@ -731,7 +731,7 @@ We'll repeat this cycle until the tests pass. Ensure no deviations from these st
         is_default = true,
         is_slash_cmd = true,
         modes = {},
-        short_name = "tests",
+        short_name = "itests",
         auto_submit = true,
         user_prompt = false,
         placement = "new",
@@ -783,9 +783,9 @@ Please generate unit tests for this code from buffer %d:
       opts = {
         index = 8,
         is_default = true,
-        is_slash_cmd = false,
+        is_slash_cmd = true,
         modes = { "v" },
-        -- short_name = "fix",
+        short_name = "fix",
         auto_submit = true,
         user_prompt = false,
         stop_context_insertion = true,
@@ -838,9 +838,9 @@ Use Markdown formatting and include the programming language name at the start o
       opts = {
         index = 9,
         is_default = true,
-        is_slash_cmd = false,
+        is_slash_cmd = true,
         modes = { "v" },
-        -- short_name = "lsp",
+        short_name = "lsp",
         auto_submit = true,
         user_prompt = false,
         stop_context_insertion = true,
@@ -919,7 +919,7 @@ This is the code, for context:
         index = 10,
         is_default = true,
         is_slash_cmd = true,
-        -- short_name = "commit",
+        short_name = "commit",
         auto_submit = true,
       },
       prompts = {
@@ -949,7 +949,7 @@ This is the code, for context:
         index = 11,
         ignore_system_prompt = true,
         is_default = true,
-        -- short_name = "workspace",
+        short_name = "workspace",
       },
       context = {
         {
