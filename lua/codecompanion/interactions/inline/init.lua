@@ -281,6 +281,51 @@ end
 function Inline:prompt(user_prompt)
   log:trace("[Inline] Starting")
 
+  -- [Added] Custom Task Prompt Logic
+  if user_prompt then
+    local adapter_config = self.adapter
+    local task_prompts = adapter_config and adapter_config.opts and adapter_config.opts.task_prompts
+
+    if task_prompts then
+      local task_name, extra_instruction = user_prompt:match("^(%S+)%s*(.*)$")
+      local task_config = task_prompts[task_name]
+
+      if task_config and task_config.prompt then
+        self.task_placement = task_config.placement or "replace"
+        log:debug("[Inline] Matched task: %s", task_name)
+
+        local ext_prompts = self:make_ext_prompts()
+        local context_code = ""
+        if ext_prompts then
+          for _, p in ipairs(ext_prompts) do
+            if p.role == user_role and p._meta and p._meta.tag == "visual" then
+               -- Extract the code from the markdown block
+               context_code = p.content:match("```%w*\n(.-)\n```") or p.content
+               break
+            end
+          end
+        end
+
+        local full_input = context_code
+        if extra_instruction and extra_instruction ~= "" then
+          full_input = full_input .. "\n\n" .. extra_instruction
+        end
+
+        local formatted = string.format(task_config.prompt, full_input)
+        
+        local prompts = {}
+        table.insert(prompts, {
+          content = formatted,
+          role = user_role,
+          opts = { visible = true },
+        })
+
+        self.prompts = prompts
+        return self:submit(vim.deepcopy(prompts))
+      end
+    end
+  end
+
   local prompts = {}
 
   local function add_prompt(content, role, opts)
@@ -292,14 +337,27 @@ function Inline:prompt(user_prompt)
   end
 
   -- Add system prompt first
-  table.insert(prompts, {
-    role = config.constants.SYSTEM_ROLE,
-    content = fmt(
+  local adapter_config = self.adapter
+  local custom_prompt_file = adapter_config and adapter_config.opts and adapter_config.opts.inline_system_prompt
+  local system_prompt_content
+
+  if custom_prompt_file and vim.fn.filereadable(custom_prompt_file) == 1 then
+    local prompt_template = table.concat(vim.fn.readfile(custom_prompt_file), "\n")
+    system_prompt_content = prompt_template
+      :gsub("{{language}}", self.buffer_context.filetype)
+      :gsub("{{placement}}", self.classification.placement or "chat")
+  else
+    system_prompt_content = fmt(
       CONSTANTS.SYSTEM_PROMPT,
       self.buffer_context.filetype,
       (self.classification.placement and CONSTANTS.RESPONSE_WITHOUT_PLACEMENT or CONSTANTS.RESPONSE_WITH_PLACEMENT),
       config.opts.language
-    ),
+    )
+  end
+
+  table.insert(prompts, {
+    role = config.constants.SYSTEM_ROLE,
+    content = system_prompt_content,
     _meta = {
       tag = "system_tag",
     },
@@ -566,6 +624,12 @@ function Inline:parse_output(output)
     if ok then
       return json
     end
+
+    -- Fallback for models that just return code block (e.g. small Ollama models)
+    return {
+      placement = self.task_placement or "replace",
+      code = markdown_code,
+    }
   end
 
   return log:error("[Inline] Failed to parse the response")
