@@ -343,9 +343,12 @@ function Inline:prompt(user_prompt)
 
   if custom_prompt_file and vim.fn.filereadable(custom_prompt_file) == 1 then
     local prompt_template = table.concat(vim.fn.readfile(custom_prompt_file), "\n")
+    local filetype = (self.buffer_context and self.buffer_context.filetype) or vim.bo.filetype or "text"
+    local placement = (self.classification and self.classification.placement) or "chat"
+
     system_prompt_content = prompt_template
-      :gsub("{{language}}", self.buffer_context.filetype)
-      :gsub("{{placement}}", self.classification.placement or "chat")
+      :gsub("{{language}}", filetype)
+      :gsub("{{placement}}", placement)
   else
     system_prompt_content = fmt(
       CONSTANTS.SYSTEM_PROMPT,
@@ -610,18 +613,34 @@ end
 ---@param output string
 ---@return table|nil
 function Inline:parse_output(output)
+  local adapter_config = self.adapter
+  local debug_mode = adapter_config and adapter_config.opts and adapter_config.opts.debug_http
+
+  if debug_mode then
+    print("[DEBUG] task_placement in parse_output:", self.task_placement)
+    print("[DEBUG] parse_output output:", output)
+  end
+
+  -- Clean code fences and newlines
+  local json_candidate = output:gsub("^```[a-zA-Z]*", ""):gsub("```$", ""):gsub("^\n*", "")
+
   -- Try parsing as plain JSON first
-  output = output:gsub("^```json", ""):gsub("```$", "")
-  local ok, json = pcall(vim.json.decode, output)
-  if ok then
+  local ok, json = pcall(vim.json.decode, json_candidate)
+  if ok and json then
+    log:debug("[Inline] Parsed JSON:\n%s", vim.inspect(json))
     return json
   end
 
   -- Fall back to Tree-sitter parsing
   local markdown_code = parse_with_treesitter(output)
+
+  if debug_mode then
+    print("[DEBUG] parse_output markdown_code:", markdown_code)
+  end
+
   if markdown_code then
     ok, json = pcall(vim.json.decode, markdown_code)
-    if ok then
+    if ok and json then
       return json
     end
 
@@ -630,6 +649,20 @@ function Inline:parse_output(output)
       placement = self.task_placement or "replace",
       code = markdown_code,
     }
+  end
+  
+  -- Fallback for pure plain-text (like LLM explanations)
+  if output and #output > 0 then
+      -- Treat plain text as code to be placed (or chat if explicit)
+      local placement = self.task_placement or "replace"
+      -- If placement is chat, we return just placement
+      if placement == "chat" then
+          return { placement = "chat" }
+      end
+      return {
+        placement = placement,
+        code = output,
+      }
   end
 
   return log:error("[Inline] Failed to parse the response")
