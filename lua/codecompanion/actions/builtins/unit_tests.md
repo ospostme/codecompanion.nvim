@@ -5,7 +5,7 @@ description: Generate unit tests for the selected code
 opts:
   alias: tests
   auto_submit: true
-  is_slash_cmd: false
+  is_slash_cmd: true
   modes:
     - v
   placement: new

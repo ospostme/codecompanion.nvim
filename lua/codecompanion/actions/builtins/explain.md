@@ -3,7 +3,7 @@ name: Explain code
 interaction: chat
 description: Explain how code in a buffer works
 opts:
-  alias: explain
+  # alias: explain
   auto_submit: true
   is_slash_cmd: true
   modes:

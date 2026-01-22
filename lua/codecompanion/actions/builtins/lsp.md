@@ -3,7 +3,7 @@ name: Explain LSP diagnostics
 interaction: chat
 description: Explain the LSP diagnostics for the selected code
 opts:
-  alias: lsp
+  # alias: lsp
   is_slash_cmd: false
   modes:
     - v

@@ -3,7 +3,7 @@ name: Commit message
 interaction: chat
 description: Generate a commit message
 opts:
-  alias: commit
+  # alias: commit
   auto_submit: false
   is_slash_cmd: true
 ---

@@ -281,14 +281,18 @@ end
 function Inline:prompt(user_prompt)
   log:trace("[Inline] Starting")
 
+  local task_name, extra_instruction
+  if user_prompt then
+    task_name, extra_instruction = user_prompt:match("^(%S+)%s*(.*)$")
+  end
+
   -- [Added] Custom Task Prompt Logic
   if user_prompt then
     local adapter_config = self.adapter
     local task_prompts = adapter_config and adapter_config.opts and adapter_config.opts.task_prompts
 
     if task_prompts then
-      local task_name, extra_instruction = user_prompt:match("^(%S+)%s*(.*)$")
-      local task_config = task_prompts[task_name]
+      local task_config = task_name and task_prompts[task_name]
 
       if task_config and task_config.prompt then
         self.task_placement = task_config.placement or "replace"
@@ -339,9 +343,13 @@ function Inline:prompt(user_prompt)
   -- Add system prompt first
   local adapter_config = self.adapter
   local custom_prompt_file = adapter_config and adapter_config.opts and adapter_config.opts.inline_system_prompt
+  
+  local inline_replace_skip = adapter_config and adapter_config.opts and adapter_config.opts.inline_replace_skip
+  local should_skip = inline_replace_skip and task_name and inline_replace_skip[task_name]
+
   local system_prompt_content
 
-  if custom_prompt_file and vim.fn.filereadable(custom_prompt_file) == 1 then
+  if not should_skip and custom_prompt_file and vim.fn.filereadable(custom_prompt_file) == 1 then
     local prompt_template = table.concat(vim.fn.readfile(custom_prompt_file), "\n")
     local filetype = (self.buffer_context and self.buffer_context.filetype) or vim.bo.filetype or "text"
     local placement = (self.classification and self.classification.placement) or "chat"
