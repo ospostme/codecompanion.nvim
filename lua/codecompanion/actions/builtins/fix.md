@@ -3,9 +3,9 @@ name: Fix code
 interaction: chat
 description: Fix the selected code
 opts:
-  # alias: fix
+  alias: fix
   auto_submit: true
-  is_slash_cmd: false
+  is_slash_cmd: true
   modes:
     - v
   stop_context_insertion: true

@@ -3,7 +3,7 @@ name: Unit tests
 interaction: inline
 description: Generate unit tests for the selected code
 opts:
-  alias: tests
+  alias: itests
   auto_submit: true
   is_slash_cmd: true
   modes:
