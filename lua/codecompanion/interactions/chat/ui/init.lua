@@ -7,6 +7,7 @@ local helpers = require("codecompanion.interactions.chat.helpers")
 local log = require("codecompanion.utils.log")
 local schema = require("codecompanion.schema")
 local ui_utils = require("codecompanion.utils.ui")
+local ui_manager = require("codecompanion.interactions.chat.ui_manager")
 local utils = require("codecompanion.utils")
 local yaml = require("codecompanion.utils.yaml")
 
@@ -16,6 +17,7 @@ local CONSTANTS = {
   NS_HEADER = api.nvim_create_namespace("CodeCompanion-headers"),
   NS_TOKENS = api.nvim_create_namespace("CodeCompanion-tokens"),
   NS_VIRTUAL_TEXT = api.nvim_create_namespace("CodeCompanion-virtual_text"),
+  CC_HIDE_LLM_RESPONSES_KEY = "__codecompanion_hide_llm_responses",
 
   AUTOCMD_GROUP = "codecompanion.chat.ui",
 }
@@ -87,9 +89,27 @@ function UI.new(args)
     tokens = args.tokens,
     winnr = args.winnr,
     window_opts = args.window_opts,
+    context = nil,
+    messages = nil,
+    opts = nil,
   }, { __index = UI })
 
+  api.nvim_buf_set_var(args.chat_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY, false)
+  api.nvim_buf_set_var(args.chat_bufnr, "chat_id", args.chat_id)
+
+  ui_manager.register(args.chat_bufnr, self)
+
   self.folds = require("codecompanion.interactions.chat.ui.folds")
+
+  api.nvim_create_autocmd("BufWipeout", {
+    group = self.aug,
+    buffer = self.chat_bufnr,
+    once = true,
+    desc = "Unregister CodeCompanion chat UI instance",
+    callback = function()
+      ui_manager.unregister(self.chat_bufnr)
+    end,
+  })
 
   api.nvim_create_autocmd("InsertEnter", {
     group = self.aug,
@@ -405,6 +425,34 @@ function UI:set_header(tbl, role)
   table.insert(tbl, "")
 end
 
+---Toggle visibility of LLM responses in the chat buffer.
+---@return nil
+function UI:toggle_llm_responses()
+  local hide_llm = api.nvim_buf_get_var(self.chat_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY)
+  local new_state = not hide_llm
+  api.nvim_buf_set_var(self.chat_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY, new_state)
+
+  if self.context and self.messages and self.opts then
+    self:render(self.context, self.messages, self.opts)
+  else
+    if self.winnr and api.nvim_win_is_valid(self.winnr) then
+      api.nvim_win_set_buf(self.winnr, self.chat_bufnr)
+      vim.cmd("redraw")
+    else
+      local winnr_found = ui_utils.buf_get_win(self.chat_bufnr)
+      if winnr_found and api.nvim_win_is_valid(winnr_found) then
+        api.nvim_win_set_buf(winnr_found, self.chat_bufnr)
+        vim.cmd("redraw")
+      else
+        vim.cmd("redraw")
+      end
+    end
+  end
+
+  log:info("LLM responses visibility toggled: %s", new_state)
+  utils.fire("ChatLLMToggle", { bufnr = self.chat_bufnr, hidden = new_state, id = self.chat_id })
+end
+
 ---Render the settings and any messages in the chat buffer
 ---@param context table
 ---@param messages table
@@ -412,6 +460,15 @@ end
 ---@return self
 function UI:render(context, messages, opts)
   opts = vim.tbl_extend("keep", opts or {}, { force_header = false, stop_context_insertion = false })
+
+  self.context = context
+  self.messages = messages
+  self.opts = opts
+
+  local current_llm_hidden = false
+  pcall(function()
+    current_llm_hidden = api.nvim_buf_get_var(self.chat_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY)
+  end)
 
   local lines = {}
 
@@ -424,7 +481,11 @@ function UI:render(context, messages, opts)
 
   local function add_messages_to_buf(msgs)
     for i, msg in ipairs(msgs) do
-      if (msg.role ~= config.constants.SYSTEM_ROLE) and not (msg.opts and msg.opts.visible == false) then
+      if
+        (msg.role ~= config.constants.SYSTEM_ROLE)
+        and not (msg.opts and msg.opts.visible == false)
+        and not (msg.role == config.constants.LLM_ROLE and current_llm_hidden)
+      then
         -- For workflow prompts: Ensure main user role doesn't get spaced
         if i > 1 and self.last_role ~= msg.role and msg.role ~= config.constants.USER_ROLE then
           spacer()
@@ -719,5 +780,34 @@ function UI:unlock_buf()
   vim.bo[self.chat_bufnr].modified = false
   vim.bo[self.chat_bufnr].modifiable = true
 end
+
+-- Add a new command to expose UI:toggle_llm_responses
+vim.api.nvim_create_user_command("CodeCompanionToggleLLMResponses", function()
+  local current_bufnr = api.nvim_get_current_buf()
+  local buftype = vim.bo[current_bufnr].buftype
+  local filetype = vim.bo[current_bufnr].filetype
+
+  if buftype == "nofile" and filetype == "codecompanion" then
+    local ui_instance = ui_manager.get(current_bufnr)
+    if ui_instance then
+      ui_instance:toggle_llm_responses()
+    else
+      log:warn("Could not find CodeCompanion UI instance for buffer %d. Redrawing.", current_bufnr)
+      vim.cmd("redraw")
+      local ok, hide_llm = pcall(api.nvim_buf_get_var, current_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY)
+      if ok then
+          local new_state = not hide_llm
+          api.nvim_buf_set_var(current_bufnr, CONSTANTS.CC_HIDE_LLM_RESPONSES_KEY, new_state)
+          local chat_id = api.nvim_buf_get_var(current_bufnr, "chat_id") or "unknown"
+          utils.fire("ChatLLMToggle", { bufnr = current_bufnr, hidden = new_state, id = chat_id })
+      end
+    end
+  else
+    log:warn("This command can only be used in a CodeCompanion chat buffer.")
+  end
+end, {
+  desc = "Toggle visibility of LLM responses in the chat buffer",
+  nargs = 0,
+})
 
 return UI
