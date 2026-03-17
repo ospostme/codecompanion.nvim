@@ -303,9 +303,9 @@ function Inline:prompt(user_prompt)
         if ext_prompts then
           for _, p in ipairs(ext_prompts) do
             if p.role == user_role and p._meta and p._meta.tag == "visual" then
-               -- Extract the code from the markdown block
-               context_code = p.content:match("```%w*\n(.-)\n```") or p.content
-               break
+              -- Extract the code from the markdown block
+              context_code = p.content:match("```%w*\n(.-)\n```") or p.content
+              break
             end
           end
         end
@@ -316,7 +316,7 @@ function Inline:prompt(user_prompt)
         end
 
         local formatted = string.format(task_config.prompt, full_input)
-        
+
         local prompts = {}
         table.insert(prompts, {
           content = formatted,
@@ -343,7 +343,7 @@ function Inline:prompt(user_prompt)
   -- Add system prompt first
   local adapter_config = self.adapter
   local custom_prompt_file = adapter_config and adapter_config.opts and adapter_config.opts.inline_system_prompt
-  
+
   local inline_replace_skip = adapter_config and adapter_config.opts and adapter_config.opts.inline_replace_skip
   local should_skip = inline_replace_skip and task_name and inline_replace_skip[task_name]
 
@@ -354,9 +354,7 @@ function Inline:prompt(user_prompt)
     local filetype = (self.buffer_context and self.buffer_context.filetype) or vim.bo.filetype or "text"
     local placement = (self.classification and self.classification.placement) or "chat"
 
-    system_prompt_content = prompt_template
-      :gsub("{{language}}", filetype)
-      :gsub("{{placement}}", placement)
+    system_prompt_content = prompt_template:gsub("{{language}}", filetype):gsub("{{placement}}", placement)
   else
     system_prompt_content = fmt(
       CONSTANTS.SYSTEM_PROMPT,
@@ -496,6 +494,10 @@ function Inline:submit(prompt)
   self.adapter.opts.stream = false
 
   self:set_keymaps(self.buffer_context.bufnr, { keymaps = { "stop" } })
+
+  -- Mark as inline for this specific request
+  self.adapter.temp = self.adapter.temp or {}
+  self.adapter.temp._is_inline_request = true
 
   self.current_request = client
     .new({ adapter = self.adapter:map_schema_to_params(), user_args = { event = "InlineStarted" } })
@@ -658,19 +660,19 @@ function Inline:parse_output(output)
       code = markdown_code,
     }
   end
-  
+
   -- Fallback for pure plain-text (like LLM explanations)
   if output and #output > 0 then
-      -- Treat plain text as code to be placed (or chat if explicit)
-      local placement = self.task_placement or "replace"
-      -- If placement is chat, we return just placement
-      if placement == "chat" then
-          return { placement = "chat" }
-      end
-      return {
-        placement = placement,
-        code = output,
-      }
+    -- Treat plain text as code to be placed (or chat if explicit)
+    local placement = self.task_placement or "replace"
+    -- If placement is chat, we return just placement
+    if placement == "chat" then
+      return { placement = "chat" }
+    end
+    return {
+      placement = placement,
+      code = output,
+    }
   end
 
   return log:error("[Inline] Failed to parse the response")
